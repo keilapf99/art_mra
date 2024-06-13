@@ -1,0 +1,110 @@
+##################### Matrices por sexo y condicion ############################
+
+# Read data --------------------------------------------------------------------
+
+counts <- vroom(file = "/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/full_counts/ROSMAP_RNAseq_filteredQC_counts_DLPFC.txt")
+metadata <- vroom(file= "/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/metadata/DLPFC/RNA_seq_metadata_DLPFC.txt")
+
+# Filtrar metadata -------------------------------------------------------------
+
+#Filtrar por sexo
+metadata_mujer <- metadata %>% 
+  filter(msex == "0")  
+
+metadata_hombre <- metadata %>% 
+  filter(msex == "1")  
+
+# Filtrar por condición 
+
+metadata_mujer_enferma <- metadata_mujer %>% 
+  filter(ceradsc == '1' | ceradsc == '2',
+         braaksc == '6'| braaksc == '5' | braaksc == '4'| braaksc == '3')
+
+metadata_mujer_health <- metadata_mujer %>% 
+  filter(ceradsc == '4' | ceradsc == '3', braaksc == '2'| braaksc == '1' | braaksc == '0')
+
+metadata_hombre_enfermo <- metadata_hombre %>% 
+  filter(ceradsc == '1' | ceradsc == '2',
+         braaksc == '6'| braaksc == '5' | braaksc == '4'| braaksc == '3')
+
+metadata_hombre_health <- metadata_hombre %>% 
+  filter(ceradsc == '4' | ceradsc == '3', braaksc == '2'| braaksc == '1' | braaksc == '0')
+
+# Unir según el sexo -----------------------------------------------------------
+
+women <- rbind(metadata_mujer_enferma, metadata_mujer_health)  
+men <- rbind(metadata_hombre_enfermo, metadata_hombre_health)
+
+# Matrices por sexo ------------------------------------------------------------
+
+########## MUJERES -------------------------------------------------------------
+counts_women <- data_frame(feature= counts$feature,
+                        counts[,colnames(counts)%in%women$specimenID])
+counts_enfermas <- data_frame(feature= counts$feature,
+                           counts[,colnames(counts)%in%metadata_mujer_enferma$specimenID])
+counts_sanas <- data_frame(feature= counts$feature,
+                           counts[,colnames(counts)%in%metadata_mujer_health$specimenID])
+
+rownames <- counts_women$feature
+counts_women<-counts_women[,-1]
+rownames(counts_women) <- rownames
+matrix_women <- as.matrix(counts_women)
+
+counts_enfermas <- counts_enfermas[,-1]
+rownames(counts_enfermas) <- rownames
+matrix_enfermas <- as.matrix(counts_enfermas)
+
+counts_sanas <- counts_sanas[,-1]
+rownames(counts_sanas) <- rownames
+matrix_sanas <- as.matrix(counts_sanas)
+
+######## HOMBRES -----------------------------------------------------------------
+
+counts_men <- data_frame(feature=counts$feature,
+                         counts[,colnames(counts)%in%men$specimenID])
+counts_enfermos <- data_frame(feature=counts$feature,
+                         counts[,colnames(counts)%in%metadata_hombre_enfermo$specimenID])
+counts_sanos <- data_frame(feature=counts$feature,
+                         counts[,colnames(counts)%in%metadata_hombre_health$specimenID])
+
+counts_men <- counts_men[,-1]
+rownames(counts_men) <- rownames
+matrix_men <- as.matrix(counts_men)
+
+counts_enfermos <- counts_enfermos[,-1]
+rownames(counts_enfermos) <- rownames
+matrix_enfermos <- as.matrix(counts_enfermos)
+
+counts_sanos<-counts_sanos[,-1]
+rownames(counts_sanos) <- rownames
+matrix_sanos <- as.matrix(counts_sanos)
+
+# Guardar matrices -------------------------------------------------------------
+
+write.table(matrix_enfermas, 
+            file = "ad_women.tsv", 
+            sep = "\t", 
+            row.names = TRUE, 
+            col.names = TRUE, 
+            quote = FALSE)
+
+write.table(matrix_sanas, 
+            file = "health_women.tsv", 
+            sep = "\t", 
+            row.names = TRUE, 
+            col.names = TRUE, 
+            quote = FALSE)
+
+write.table(matrix_enfermos, 
+            file = "ad_men.tsv", 
+            sep = "\t", 
+            row.names = TRUE, 
+            col.names = TRUE, 
+            quote = FALSE)
+
+write.table(matrix_sanos,
+            file="health_men.tsv",
+            sep = "\t",
+            row.names = TRUE,
+            col.names = TRUE,
+            quote = FALSE)
