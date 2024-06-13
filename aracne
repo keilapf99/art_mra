@@ -1,0 +1,31 @@
+######################## ARACNe-AP #########################
+
+# DATA -----------------------------------------------------
+# Traer de sefirot a central mis matrices y mi lista de FTs
+# Esto correrlo en la terminal de sefirot
+scp ad_women.tsv aperez@10.0.15.10:/labs/genut/keilapf/art
+scp health_women.tsv aperez@10.0.15.10:/labs/genut/keilapf/art
+scp ad_men.tsv aperez@10.0.15.10:/labs/genut/keilapf/art
+scp health_men.tsv aperez@10.0.15.10:/labs/genut/keilapf/art
+scp FTS_ENSEMBL.txt aperez@10.0.15.10:/labs/genut/keilapf/art
+
+# Se supone ya debe estar en esa carpeta en central
+# Modificar cada matriz con nano, de manera que ya tenga la primera columna que 
+# con el traspaso se elimina, es decir, agregar primera columna de "gene_id"
+
+# THRESHOLD --------------------------------------------------
+java -Xmx300G -jar  /labs/genut/software/ARACNe-AP/dist/aracne.jar -e health_men.tsv  -o outputFolder_healthmen --tfs FTS_ENSEMBL.txt --pvalue 1E-8 --seed 1 \
+--calculateThreshold
+
+# BOOTSTRAPPING ----------------------------------------------
+for i in {1..100}
+do
+java -Xmx300G -jar /labs/genut/software/ARACNe-AP/dist/aracne.jar -e health_men.tsv  -o outputFolder_healthmen --tfs FTS_ENSEMBL.txt --pvalue 1E-8 --seed $i
+done
+
+# NETWORK ----------------------------------------------------
+java -Xmx300G -jar /labs/genut/software/ARACNe-AP/dist/aracne.jar -o outputFolder_healthmen --consolidate
+
+# Llevar a sefirot nuevamente para trabajar el MRA allá 
+# Correr codigo en terminal sefirot
+scp aperez@10.0.15.10:/labs/genut/keilapf/art/outputFolder_healthmen/network.txt .
