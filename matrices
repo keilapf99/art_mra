@@ -15,7 +15,6 @@ metadata_hombre <- metadata %>%
   filter(msex == "1")  
 
 # Filtrar por condición 
-
 metadata_mujer_enferma <- metadata_mujer %>% 
   filter(ceradsc == '1' | ceradsc == '2',
          braaksc == '6'| braaksc == '5' | braaksc == '4'| braaksc == '3')
