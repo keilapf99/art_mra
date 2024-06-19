@@ -1,6 +1,7 @@
 #
 #3.differential_expression_DEseq2.R
-#This script perform 
+#this script processes RNA-seq data 
+#and performs the differential expression test to identify differentially expressed genes. 
 
 #Libraries --- ---
 
@@ -11,13 +12,13 @@ pacman::p_load("dplyr",
                "pheatmap", 
                "ggplot2", 
                "ggrepel", 
-               "biomaRt")
+               "biomaRt", 
+               "RColorBrewer")
 
 #Define functions --- ---
 
 #Function to translate gene names
 ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl") # Connecting to the Ensembl database through biomaRt
-
 
 # Define function to convert from ENSMBL to SYMBOL
 convert_ens_to_symbol <- function(ensembl_ids) {
@@ -26,6 +27,10 @@ convert_ens_to_symbol <- function(ensembl_ids) {
         values = ensembl_ids,
         mart = ensembl)
 }
+
+#Function to calculate Z-scores
+
+cal_z_score <- function(x){(x)-mean(x) / sd (x)}
 
 #Get data --- ---
 
@@ -91,7 +96,7 @@ dds$dicho_NIA_reagan <- factor(dds$dicho_NIA_reagan, levels = c("0", "1"))
 
 #Differential expression analysis --- ---
 
-dds <- DESeq(dds)  #Little slow
+dds <- DESeq(dds)  #Slow
 #Results
 res <- results(dds, alpha=0.05) #alpha is the FDR limit
 
@@ -99,38 +104,51 @@ res <- results(dds, alpha=0.05) #alpha is the FDR limit
 sum(res$padj < 0.1, na.rm=TRUE)
 #[1] 4914
 
-#How many adjusted p-values were less than 0.05?
-sum(res$padj < 0.05, na.rm=TRUE)
-#[1] 2984
-
-#Order results by p-value
+#Order results by p-value adjusted
 res.df <- res[order(res$padj),] %>% as.data.frame()
-
-#Remove version gene
-rownames(res.df) <- str_remove(rownames(res.df), "\\..*$")
 
 # add a column of NAs
 res.df$diffexpressed <- "NO"
 # if log2Foldchange > 0.1 and pvalue < 0.05, set as "UP" 
-res.df$diffexpressed[res.df$log2FoldChange > 1 & res.df$padj < 0.05] <- "UP"
+res.df$diffexpressed[res.df$log2FoldChange > 0.1 & res.df$pvalue < 0.05] <- "UP"
 # if log2Foldchange < -0.1 and pvalue < 0.05, set as "DOWN"
-res.df$diffexpressed[res.df$log2FoldChange < -1 & res.df$padj < 0.05] <- "DOWN"
+res.df$diffexpressed[res.df$log2FoldChange < -0.1 & res.df$pvalue < 0.05] <- "DOWN"
+
+table(res.df$diffexpressed)
+
+#DLPFC
+# 
+# DOWN    NO    UP 
+# 1555 26527  2575 
 
 #Add gene names in SYMBOL --- ---
+
+#Remove version gene
+rownames(res.df) <- str_remove(rownames(res.df), "\\..*$")
 
 #Create dictionary
 symbol <- convert_ens_to_symbol(rownames(res.df))
 symbol$external_gene_name <- ifelse(symbol$external_gene_name == "", symbol$ensembl_gene_id, symbol$external_gene_name)
 #merge
 
-# Convertir rownames en columna
+# Make rownames columns
 res.df <- res.df %>% mutate(ensembl_gene_id = rownames(.), .before = 1) 
-res.df <- res.df %>% left_join(symbol, by = "ensembl_gene_id")
+res.df <- res.df %>% left_join(symbol, by = "ensembl_gene_id") #merge
 
 #Extract DEGs --- ---
 
 DEGS <- res.df %>% filter(diffexpressed != "NO")
 rownames(DEGS) <- DEGS$ensembl_gene_id
+dim(DEGS)
+#[1] 4130    9
+
+#Save log2fold change full list --- ---
+
+#vroom::vroom_write(res.df, file = "/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/DEGs/ROSMAP_DLFPC_differential_expr_dichoNIAReagan.txt")
+
+#Save DEGs list --- ---
+
+#vroom::vroom_write(DEGS, file = "/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/DEGs/ROSMAP_DLFPC_DEGS_dichoNIAReagan.txt")
 
 #Create matrix of DEG counts --- ---
 
@@ -139,25 +157,140 @@ rownames(DEG_mat)  <- str_remove(rownames(DEG_mat) , "\\..*$")
 
 DEG_mat <- DEG_mat %>% filter(rownames(DEG_mat) %in% DEGS$ensembl_gene_id)
 dim(DEG_mat)
+#[1] 4130  880
 
-# Create correlation matrix
+# Create correlation matrix (distance matrix)
 
 DEG_mat.z <- t(apply(DEG_mat, 1, scale))
 #Add sample names
 colnames(DEG_mat.z) <- colnames(DEG_mat) 
 
-#Separe by condition
+DEG_mat.z[1:20, 1:20]
 
-condition <- data.frame(specimenID = colnames(DEG_mat.z))
-condition <- condition %>% left_join(coldata, by = "specimenID")
-condition <- condition %>% dplyr::select(specimenID, dicho_NIA_reagan)
+#You can also try (I think this is better)
 
-#Heat
+#Estimate dispersion trend and apply a variance stabilizing transformation
+vsd <- vst(dds, blind = F) #whether to blind the transformation to the experimental design 
+vsd_assay <- assay(vsd) %>% t() #assay function is used to extract the matrix of normalized values
+
+#Sample distance metrix
+sampleDists <- dist(vsd_assay) #slow
+sampleDistsMatrix <- as.matrix(sampleDists) #
+
+rownames(sampleDistsMatrix) <- paste(vsd$specimenID, vsd$dicho_NIA_reagan, sep="-")
+colnames(sampleDistsMatrix) <- paste(vsd$specimenID, vsd$dicho_NIA_reagan, sep="-")
+
+# Vis
+
+sampleDistsMatrix[1:5, 1:5]
+
+#Heatmap --- ---
+
+# Extract sample information
+sample_info <- data.frame(
+  AD_NIA_Reagan_dichotomous = vsd$dicho_NIA_reagan
+)
+rownames(sample_info) <- rownames(sampleDistsMatrix)
+
+condition_colors <- list(
+  AD_NIA_Reagan_dichotomous = c("0" = "blue", "1" = "red") # adjust the colors and names according to your data
+)
+
+#Heatmap of sample-to-sample distance matrix (with clustering) based on normalized counts ---
+
+#Set a color scheme
+colors <- colorRampPalette( rev(brewer.pal(9, "Purples")) )(255)
+
+#Generate the heatmap
+
+#This heatmap tells you what samples are more likely to each other
+
+distances.p <- pheatmap(sampleDistsMatrix,
+         annotation_col = sample_info, 
+         annotation_row = sample_info, 
+         annotation_colors = condition_colors, 
+         show_rownames = F, 
+         show_colnames = F, 
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+#Heatmap of log transformed normalized counts with top10 genes ---
+
+# Choose top 10 genes
+DEG_top10 <- res.df %>% filter(!is.na(padj))
+DEG_top10 <- DEG_top10[order(res.df$padj),][1:20,]
+
+#Log transformation
+
+rld <- rlog(dds, blind = FALSE)
+
+annot_info <- as.data.frame(coldata(dds)[, c("", "")])
+
+#plot
+
+DEG_top10.p <- pheatmap(assay(rld)[DEG_top10],
+         cluster_rows = F, 
+         show_rownames = T, 
+         cluster_cols = F, 
+         annotation_col = sample_info, 
+         annotation_row = sample_info)
+
+#Heatmap of Z scores. Top 10 genes --- 
+
+# Get normalized counts
+
+norm_counts <- counts(dds, normalized=TRUE)
+
+#The Z-score gives the number of standard-deviations that a value is away from the mean of all the values in the same group, here the same gene. 
+
+#Compute the Z-scores 
+
+zscore_all <- t(apply(norm_counts, 1, cal_z_score))
+
+zscore_subset <- zscore_all[DEG_top10, ]
+
+#Plot
+
+zscores.p <- pheatmap(zscore_subset, )
+
+#with complexheatmap ---
+
+col_logFC <- colorRamp2(c(min()))
 
 ComplexHeatmap::Heatmap(DEG_mat.z, cluster_rows = T, cluster_columns = T, 
-                        column_labels = colnames(DEG_mat.z),column_title = "Samples", row_title = "DEGs",
-                       # column_split = list(specimenID = condition$specimenID, dicho_NIA_reagan = condition$dicho_NIA_reagan),
+                        column_labels = colnames(DEG_mat.z),
+                        column_title = "Samples", row_title = "DEGs",
+                        # column_split = list(specimenID = condition$specimenID, dicho_NIA_reagan = condition$dicho_NIA_reagan),
                         name = "Z-score", row_labels = DEGS[rownames(DEG_mat.z),]$external_gene_name)
+
+# Save heatmaps --- ---
+
+#distances.p
+ggsave("/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/DEGs/ROSMAP_dicho_NIAReagan_sample_distances.png", 
+       plot = distances.p, 
+       width = 11,
+       height = 15,
+       units = "in",
+       dpi = 300)
+
+#DEG_top10.p
+
+ggsave("/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/DEGs/ROSMAP_dicho_NIAReagan_DEG_top10.png", 
+       plot = DEG_top10.p, 
+       width = 11,
+       height = 15,
+       units = "in",
+       dpi = 300)
+
+#zscores.p
+
+ggsave("/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/DEGs/ROSMAP_dicho_NIAReagan_zscores.png", 
+       plot = zscores.p, 
+       width = 11,
+       height = 15,
+       units = "in",
+       dpi = 300)
 
 #Vulcano plot --- ---
 
@@ -165,7 +298,7 @@ ComplexHeatmap::Heatmap(DEG_mat.z, cluster_rows = T, cluster_columns = T,
 res.df <- res.df %>% mutate(delabel = ifelse(diffexpressed != "NO", external_gene_name, NA))
 
 #
-vplot <- ggplot(data=res.df, aes(x=log2FoldChange, y=-log10(pvalue),  col=diffexpressed, label=delabel)) +
+vplot <- ggplot(data=res.df, aes(x=log2FoldChange, y=-log10(pvalue),  col = diffexpressed, label = delabel)) +
   geom_point() +
   # Add vertical lines for log2FoldChange thresholds, and one horizontal line for the p-value threshold 
   geom_vline(xintercept=c(-0.6, 0.6), col="red") + #log2FoldChange threshold is 0.6
@@ -175,20 +308,12 @@ vplot <- ggplot(data=res.df, aes(x=log2FoldChange, y=-log10(pvalue),  col=diffex
   geom_text_repel() +
   labs(title = "Differential expression", 
         sub = "Using dichotomic NIA-Reagan Criteria")
-  
-#Pheatmap 
 
-ntd <- normTransform(dds)
+#Save Vulcano Plot ---
 
-select <- order(rowMeans(counts(dds,normalized=TRUE)),
-                decreasing=TRUE)[1:10]
-
-pheatmap.df <- as.data.frame(colData(dds)[,c("dicho_NIA_reagan","msex")])
-
-pheatmap(assay(ntd)[select,], cluster_rows = TRUE, show_rownames = FALSE,
-         cluster_cols = TRUE , annotation_col = pheatmap.df)
-
-#Save data --- ---
-
-#Save DEGs data
-vroom::vroom_write()
+ggsave("/datos/rosmap/data_by_counts/ROSMAP_counts/counts_by_tissue/DLFPC/DEGs/ROSMAP_dicho_NIAReagan_vulcano_plot.png", 
+       plot = vplot, 
+       width = 11,
+       height = 15,
+       units = "in",
+       dpi = 300)
